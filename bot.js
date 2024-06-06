@@ -2,158 +2,67 @@ const { Telegraf, session } = require('telegraf');
 const mysql = require('mysql2/promise');
 const { telegramBotToken, dbConfig } = require('./config');
 
-console.log(telegramBotToken)
-console.log(dbConfig)
-
 const bot = new Telegraf(telegramBotToken);
-
 const pool = mysql.createPool(dbConfig);
 
-async function getRunningSession(userId) {
-    const [latestSessionRow] = await pool.execute(
-        'SELECT * FROM timer_sessions WHERE user_id = ? AND command = ? AND duration = 0 ORDER BY start_time DESC LIMIT 1',
-        [userId, 'start']
-    )
-    return { isRunning: latestSessionRow.length > 0 ? true : false, session: latestSessionRow }
-}
-
-async function getPausedSession(userId) {
-    const [existingSessionRows] = await pool.execute(
-        'SELECT * FROM timer_sessions WHERE user_id = ? AND command = ?',
-        [userId, 'stop']
+// Command to start the stopwatch
+bot.command('start', async (ctx) => {
+  try {
+    // Insert a new record with start_time as current timestamp
+    const [result] = await pool.execute(
+      `INSERT INTO timer_sessions (start_time) VALUES (CURRENT_TIMESTAMP)`
     );
 
-    return { isPaused: existingSessionRows.length > 0 ? true : false, session: existingSessionRows }
-}
-
-bot.start(async (ctx) => {
-    const userId = ctx.from.id;
-
-    let currentSession = await getRunningSession(userId);
-
-    if (currentSession.isRunning) {
-        return ctx.reply('Timer already running.');
-    }
-
-    currentSession = await getPausedSession(userId);
-
-    if (currentSession.isPaused) {
-        const id = currentSession.session[0].id;
-
-        await pool.execute(
-            'UPDATE timer_sessions SET command = ? WHERE id = ?',
-            ['start', id]
-        );
-
-        return ctx.reply('Stopwatch resumed.');
-    }
-
-    await pool.execute(
-        'INSERT INTO timer_sessions (user_id, command) VALUES (?, ?)',
-        [userId, 'start']
-    );
-    ctx.reply('Stopwatch started.');
-
+    const insertedId = result.insertId;
+    ctx.reply(`Stopwatch started!`);
+  } catch (error) {
+    console.error('Error starting stopwatch:', error);
+    ctx.reply('Failed to start the stopwatch.');
+  }
 });
 
+// Command to stop the stopwatch
 bot.command('stop', async (ctx) => {
-    const userId = ctx.from.id;
-
-    let currentSession = await getRunningSession(userId);
-
-    if (currentSession.isRunning) {
-        const id = currentSession.session[0].id;
-        const startTime = currentSession.session[0].start_time;
-        const duration = Math.floor((Date.now() - new Date(startTime)) / 1000);
-        await pool.execute(
-            'UPDATE timer_sessions SET command = ? WHERE id = ?',
-            ['stop', id]
-        );
-        return ctx.reply(`Stopwatch stopped. Elapsed time: ${formatTime(duration)}`);
-    }
-
-    currentSession = await getPausedSession(userId);
-
-    if (currentSession.isPaused) {
-        return ctx.reply('Stopwatch is already paused');
-    }
-
-    ctx.reply('No stopwatch running');
-});
-
-bot.command('reset', async (ctx) => {
-    const userId = ctx.from.id;
-
-    let duration;
-
-    let currentSession = await getRunningSession(userId);
-
-    if (currentSession.isRunning) {
-        const id = currentSession.session[0].id;
-        const startTime = currentSession.session[0].start_time;
-        duration = Math.floor((Date.now() - new Date(startTime)) / 1000);
-
-        await pool.execute(
-            'UPDATE timer_sessions SET command = ?, duration = ? WHERE id = ?',
-            ['reset', duration, id]
-        );
-        return ctx.reply(`Stopwatch reset. Elapsed Session Time: ${formatTime(duration)}`);
-    }
-
-    currentSession = await getPausedSession(userId);
-
-    if (currentSession.isPaused) {
-        const id = currentSession.session[0].id;
-        const startTime = currentSession.session[0].start_time;
-        duration = Math.floor((Date.now() - new Date(startTime)) / 1000);
-
-        await pool.execute(
-            'UPDATE timer_sessions SET command = ?, duration = ? WHERE id = ?',
-            ['reset', duration, id]
-        );
-        return ctx.reply(`Stopwatch reset. Elapsed Session Time: ${formatTime(duration)} `);
-    }
-});
-
-bot.command('history', async (ctx) => {
-    const userId = ctx.from.id;
-
+  try {
+    // Find the latest session with no end_time set
     const [rows] = await pool.execute(
-        'SELECT * FROM timer_sessions WHERE user_id = ? ORDER BY start_time ASC',
-        [userId]
+      `SELECT id, start_time FROM timer_sessions WHERE end_time IS NULL ORDER BY id DESC LIMIT 1`
     );
 
     if (rows.length === 0) {
-        ctx.reply('No history found.');
-        return;
+      ctx.reply('No active stopwatch session found.');
+      return;
     }
 
-    const [totalRows] = await pool.execute(
-        'SELECT SUM(duration) AS total_duration FROM timer_sessions WHERE user_id = ?',
-        [userId]
+    const sessionId = rows[0].id;
+    const startTime = new Date(rows[0].start_time);
+
+    // Update the end_time for this session
+    await pool.execute(
+      `UPDATE timer_sessions SET end_time = CURRENT_TIMESTAMP WHERE id = ?`,
+      [sessionId]
     );
-    const totalDuration = totalRows[0].total_duration || 0;
 
-    let historyMessage = `Total Time: ${formatTime(totalDuration)} seconds\n`;
+    const [updatedRows] = await pool.execute(
+      `SELECT end_time FROM timer_sessions WHERE id = ?`,
+      [sessionId]
+    );
 
-    rows.forEach((row, index) => {
-        historyMessage += `Session ${index + 1}: ${row.duration > 0 ? formatTime(row.duration) : "Running"} \n`;
-    });
+    const endTime = new Date(updatedRows[0].end_time);
+    const elapsedTime = endTime - startTime;
 
-    ctx.reply(historyMessage);
+    const elapsedSeconds = Math.floor(elapsedTime / 1000);
+    const seconds = elapsedSeconds % 60;
+    const minutes = Math.floor(elapsedSeconds / 60) % 60;
+    const hours = Math.floor(elapsedSeconds / 3600);
+
+    ctx.reply(`Stopwatch stopped! Elapsed time: ${hours}h ${minutes}m ${seconds}s`);
+  } catch (error) {
+    console.error('Error stopping stopwatch:', error);
+    ctx.reply('Failed to stop the stopwatch.');
+  }
 });
 
-function formatTime(seconds) {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const remainingSeconds = seconds % 60;
-
-    const hoursDisplay = hours > 0 ? hours + 'h ' : '';
-    const minutesDisplay = minutes > 0 ? minutes + 'm ' : '';
-    const secondsDisplay = remainingSeconds + 's';
-
-    return hoursDisplay + minutesDisplay + secondsDisplay;
-}
-
 bot.launch();
-console.log('Bot is running...');
+
+console.log('Bot started...');
