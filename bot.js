@@ -37,7 +37,7 @@ bot.command('stop', async (ctx) => {
     await pool.query(`UPDATE timers SET isPaused = true WHERE timer_id = ?`, [timer_id]);
 
     const [totalResult] = await pool.query(
-      `SELECT TIMESTAMPDIFF(SECOND, ?, NOW()) AS duration FROM timers WHERE timer_id = ?`,
+      `SELECT TIMESTAMPDIFF(SECOND, start_time, NOW()) AS duration FROM timers WHERE timer_id = ?`,
       [timer_id]
     );
     const total = totalResult[0].duration
@@ -48,7 +48,7 @@ bot.command('stop', async (ctx) => {
 
 bot.command('reset', async (ctx) => {
   await pool.query(`UPDATE timers SET end_time = NOW() WHERE end_time IS NULL`); // Correctly end the current timer
-  await pool.query(`UPDATE stopwatch_sessions SET status = 'reset', stop_time = NOW(), WHERE status = 'running'`); // Correctly reset running sessions
+  await pool.query(`UPDATE stopwatch_sessions SET status = 'reset', stop_time = NOW() WHERE status = 'running'`); // Correctly reset running sessions
   ctx.reply('Stopwatch and current session reset!');
 });
 
@@ -57,8 +57,7 @@ bot.command('history', async (ctx) => {
   let message = 'Timer Sessions History:\n\n';
   for (let timer of timers) {
     message += `Timer ${timer.timer_id}:\n`;
-    const totalDuration = (timer.end_time.getTime() - timer.start_time.getTime()) / 1000;
-    message += `Total duration: ${totalDuration} \n`
+    let totalDuration = 0;
     const [sessions] = await pool.query(`SELECT * FROM stopwatch_sessions WHERE timer_id = ? ORDER BY session_id`, [timer.timer_id]);
     sessions.forEach((session, index) => {
       const { start_time, stop_time } = session
@@ -68,10 +67,17 @@ bot.command('history', async (ctx) => {
       const hours = Math.floor(totalTime / 3600);
       const minutes = Math.floor((totalTime % 3600) / 60);
       const seconds = totalTime % 60;
-      message += `  Session ${index + 1}: ${startTime} - ${stopTime} - ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}\n`;
+      totalDuration += totalTime;
+      message += `Session ${index + 1}: ${startTime} - ${stopTime} - ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}\n`;
     });
+
+    const totalHours = Math.floor(totalDuration / 3600);
+    const totalMinutes = Math.floor((totalDuration % 3600) / 60);
+    const totalSeconds = totalDuration % 60;
+    message += `Total Duration: ${totalHours.toString().padStart(2, '0')}:${totalMinutes.toString().padStart(2, '0')}:${totalSeconds.toString().padStart(2, '0')} \n\n`;
   }
   ctx.reply(message);
 });
 
 bot.launch();
+console.log('Bot running');
