@@ -32,5 +32,4 @@ ALTER TABLE `timers`
 
 ALTER TABLE `stopwatch_sessions`
   ADD CONSTRAINT `stopwatch_sessions_ibfk_1` FOREIGN KEY (`timer_id`) REFERENCES `timers` (`timer_id`);
-COMMIT;
 
