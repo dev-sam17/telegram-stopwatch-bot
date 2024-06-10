@@ -1,25 +1,24 @@
+require('dotenv').config({ path: './.test.env' });
 const { startStopwatch, stopStopwatch, resetStopwatch, getHistory, clearAllData } = require('./timer');
 
 function delay(seconds = 0) {
     return new Promise((resolve) =>
-        setTimeout(resolve, seconds )
+        setTimeout(resolve, seconds)
     );
 }
+
+console.log(process.env.DB_NAME);
 
 async function testTimer() {
     await clearAllData()
 
     const startTime = await startStopwatch()
-    console.log('1', startTime)
-
-    startTime.active === 0 && startTime.paused === 0 ?  console.log("1 passed") : console.log('1 Failed')
+    startTime.active === 0 && startTime.paused === 0 ? console.log("1 passed") : console.log('1 Failed');
 
     await delay(2000);
 
     const startTime2 = await startStopwatch();
-    console.log('2', startTime2)
-
-    if(startTime2.active > 0 && startTime2.paused === 0) { console.log("2 passed") }else {console.log('2 Failed');}
+    if (startTime2.active > 0 && startTime2.paused === 0) { console.log("2 passed") } else { console.log('2 Failed'); }
 
     await delay(3000);
 
@@ -39,7 +38,7 @@ async function testTimer() {
     await delay(2000)
 
     const resetTime = await resetStopwatch();
-    resetTime.affectedRows > 0 ? 
+    resetTime.affectedRows > 0 ?
         console.log("6 passed") : console.log("6 failed");
 }
 

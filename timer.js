@@ -2,41 +2,37 @@ const mysql = require('mysql2/promise');
 const moment = require('moment-timezone');
 const momentDuration = require('moment');
 require('moment-duration-format');
-const { dbConfig} = require('./config');
-const { message } = require('telegraf/filters');
+const { dbConfig } = require('./config');
 
 const pool = mysql.createPool(dbConfig);
 
 async function clearAllData() {
-    const p2=pool.execute('DELETE FROM stopwatch_sessions')
-    const p1= pool.execute('DELETE FROM timers')
-     await Promise.all([p1,p2])
+  const p2 = pool.execute('DELETE FROM stopwatch_sessions')
+  const p1 = pool.execute('DELETE FROM timers')
+  await Promise.all([p1, p2])
 }
 
 async function startStopwatch() {
   const [active] = await pool.query(`SELECT * FROM timers WHERE end_time IS NULL AND isPaused = 0`);
   const [paused] = await pool.query(`SELECT * FROM timers WHERE end_time IS NULL AND isPaused = 1`);
 
-  console.log('DEGUB START', {active, paused})
   if (active.length > 0) {
     return { message: 'A stopwatch is already running.', active: active.length, paused: paused.length };
-  } 
-  
+  }
+
   if (paused.length > 0) {
     const timerId = paused[0].timer_id;
     await pool.query(`INSERT INTO stopwatch_sessions (timer_id, start_time, status) VALUES (?, NOW(), 'running')`, [timerId]);
     await pool.query(`UPDATE timers SET isPaused = 0 WHERE timer_id = ?`, [timerId]);
     return { message: 'Stopwatch resumed.', active: active.length, paused: paused.length };
-  } 
+  }
 
-    const [timerResult] = await pool.query(`INSERT INTO timers (start_time, isPaused)  VALUES (NOW(), 0)`, []);
-    const timerId = timerResult.insertId;
-    await pool.query(`INSERT INTO stopwatch_sessions (timer_id, start_time, status) VALUES (?, NOW(), 'running')`, [timerId]);
+  const [timerResult] = await pool.query(`INSERT INTO timers (start_time, isPaused)  VALUES (NOW(), 0)`, []);
+  const timerId = timerResult.insertId;
+  await pool.query(`INSERT INTO stopwatch_sessions (timer_id, start_time, status) VALUES (?, NOW(), 'running')`, [timerId]);
 
-    const [rows]=await pool.execute('SELECT * FROM timers')
-    console.log('AFTER INSERTING', rows)
-    return { message: 'Stopwatch started!', active: active.length, paused: paused.length };
-  
+  return { message: 'Stopwatch started!', active: active.length, paused: paused.length };
+
 }
 
 async function stopStopwatch() {
@@ -45,29 +41,28 @@ async function stopStopwatch() {
   );
 
   if (activeSession.length === 0) {
-    return {message:'No active stopwatch to stop.', activeSession : activeSession.length};
+    return { message: 'No active stopwatch to stop.', activeSession: activeSession.length };
   }
-  
-    const { session_id, timer_id, start_time } = activeSession[0];
-    await pool.query(`UPDATE stopwatch_sessions SET stop_time = NOW(), status = 'stopped' WHERE session_id = ?`, [session_id]);
-    await pool.query(`UPDATE timers SET isPaused = 1 WHERE timer_id = ?`, [timer_id]);
 
-    const [totalResult] = await pool.query(
-      `SELECT TIMESTAMPDIFF(SECOND, ?, NOW()) AS duration FROM stopwatch_sessions WHERE session_id = ?`,
-      [start_time, session_id]
-    );
-    const total = totalResult[0].duration;
+  const { session_id, timer_id, start_time } = activeSession[0];
+  await pool.query(`UPDATE stopwatch_sessions SET stop_time = NOW(), status = 'stopped' WHERE session_id = ?`, [session_id]);
+  await pool.query(`UPDATE timers SET isPaused = 1 WHERE timer_id = ?`, [timer_id]);
 
-    return {message:`Stopwatch stopped!  Time: ${formatSeconds(total)} seconds`, time: total, activeSession: activeSession.length };
-  
+  const [totalResult] = await pool.query(
+    `SELECT TIMESTAMPDIFF(SECOND, ?, NOW()) AS duration FROM stopwatch_sessions WHERE session_id = ?`,
+    [start_time, session_id]
+  );
+  const total = totalResult[0].duration;
+
+  return { message: `Stopwatch stopped!  Time: ${formatSeconds(total)} seconds`, time: total, activeSession: activeSession.length };
+
 }
 
 async function resetStopwatch() {
   const [data] = await pool.query(`UPDATE timers SET end_time = NOW() WHERE end_time IS NULL`);
 
   await stopStopwatch();
-//   await pool.query(`UPDATE stopwatch_sessions SET status = 'reset', stop_time = NOW() WHERE status = 'running'`);
-  return { message: 'Stopwatch and current session reset!', affectedRows: data.affectedRows};
+  return { message: 'Stopwatch and current session reset!', affectedRows: data.affectedRows };
 }
 
 async function getHistory() {

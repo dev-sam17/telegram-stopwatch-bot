@@ -1,7 +1,7 @@
 const { Telegraf } = require('telegraf');
 const { composer, checkGroupMiddleware } = require('./middleware');
 
-const { telegramBotToken} = require('./config')
+const { telegramBotToken } = require('./config')
 
 const { startStopwatch, stopStopwatch, resetStopwatch, getHistory } = require('./timer');
 
