@@ -1,11 +1,23 @@
 const { Telegraf } = require('telegraf');
 const mysql = require('mysql2/promise');
+const moment = require('moment-timezone');
+const momentDuration = require('moment');
+require('moment-duration-format');
+
 const { telegramBotToken, dbConfig } = require('./config');
+const { composer, checkGroupMiddleware } = require('./middleware');
 
 const bot = new Telegraf(telegramBotToken);
 const pool = mysql.createPool(dbConfig);
+bot.use(composer);
 
-bot.command('start', async (ctx) => {
+const GROUP_ID = -1002233703209;
+const checkGroup = checkGroupMiddleware(GROUP_ID);
+
+console.log('sasd243')
+console.log(512333)
+
+bot.command('start', checkGroup, async (ctx) => {
   const [active] = await pool.query(`SELECT * FROM timers WHERE end_time IS NULL AND isPaused = false`);
   const [paused] = await pool.query(`SELECT * FROM timers WHERE end_time IS NULL AND isPaused = true`);
   if (active.length > 0) {
@@ -24,35 +36,36 @@ bot.command('start', async (ctx) => {
   }
 });
 
-bot.command('stop', async (ctx) => {
+bot.command('stop', checkGroup, async (ctx) => {
   const [activeSession] = await pool.query(
     `SELECT session_id, start_time, timer_id FROM stopwatch_sessions WHERE status = 'running' ORDER BY session_id DESC LIMIT 1`
   );
   if (activeSession.length === 0) {
     ctx.reply('No active stopwatch to stop.');
   } else {
-    const { session_id, timer_id } = activeSession[0];
+    const { session_id, timer_id, start_time } = activeSession[0];
     await pool.query(`UPDATE stopwatch_sessions SET stop_time = NOW(), status = 'stopped' WHERE session_id = ?`, [session_id]);
 
     await pool.query(`UPDATE timers SET isPaused = true WHERE timer_id = ?`, [timer_id]);
 
     const [totalResult] = await pool.query(
-      `SELECT TIMESTAMPDIFF(SECOND, start_time, NOW()) AS duration FROM timers WHERE timer_id = ?`,
-      [timer_id]
+      `SELECT TIMESTAMPDIFF(SECOND, ?, NOW()) AS duration FROM stopwatch_sessions WHERE session_id = ?`,
+      [start_time, session_id]
     );
     const total = totalResult[0].duration
-    // await pool.query(`UPDATE stopwatch_sessions SET total_time = ? WHERE session_id = ?`, [total, session_id]);
+
     ctx.reply(`Stopwatch stopped!  Time: ${total} seconds`);
   }
 });
 
-bot.command('reset', async (ctx) => {
-  await pool.query(`UPDATE timers SET end_time = NOW() WHERE end_time IS NULL`); // Correctly end the current timer
-  await pool.query(`UPDATE stopwatch_sessions SET status = 'reset', stop_time = NOW() WHERE status = 'running'`); // Correctly reset running sessions
+bot.command('reset', checkGroup, async (ctx) => {
+  await pool.query(`UPDATE timers SET end_time = NOW() WHERE end_time IS NULL`);
+  await pool.query(`UPDATE stopwatch_sessions SET status = 'reset', stop_time = NOW() WHERE status = 'running'`); 
+
   ctx.reply('Stopwatch and current session reset!');
 });
 
-bot.command('history', async (ctx) => {
+bot.command('history', checkGroup, async (ctx) => {
   const [timers] = await pool.query(`SELECT * FROM timers ORDER BY timer_id DESC`);
   let message = 'Timer Sessions History:\n\n';
   for (let timer of timers) {
@@ -61,23 +74,42 @@ bot.command('history', async (ctx) => {
     const [sessions] = await pool.query(`SELECT * FROM stopwatch_sessions WHERE timer_id = ? ORDER BY session_id`, [timer.timer_id]);
     sessions.forEach((session, index) => {
       const { start_time, stop_time } = session
-      const startTime = start_time ? start_time.toISOString().replace('T', ' ').substring(0, 19) : 'Not Started';
-      const stopTime = stop_time ? stop_time.toISOString().replace('T', ' ').substring(0, 19) : 'Not Stopped';
+      const startTime = start_time ? moment(start_time).tz('Asia/Kolkata').format('DD/MM hh:mm A') : 'Not Started';
+      const stopTime = stop_time ? moment(stop_time).tz('Asia/Kolkata').format('DD/MM hh:mm A') : 'Not Stopped';
       const totalTime = stop_time != null ? ((stop_time.getTime() - start_time.getTime()) / 1000) : 0;
-      const hours = Math.floor(totalTime / 3600);
-      const minutes = Math.floor((totalTime % 3600) / 60);
-      const seconds = totalTime % 60;
       totalDuration += totalTime;
-      message += `Session ${index + 1}: ${startTime} - ${stopTime} - ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}\n`;
+      message += `Session ${index + 1}: \n ${startTime} - ${stopTime} - ${formatSeconds(totalTime)}\n`;
     });
 
-    const totalHours = Math.floor(totalDuration / 3600);
-    const totalMinutes = Math.floor((totalDuration % 3600) / 60);
-    const totalSeconds = totalDuration % 60;
-    message += `Total Duration: ${totalHours.toString().padStart(2, '0')}:${totalMinutes.toString().padStart(2, '0')}:${totalSeconds.toString().padStart(2, '0')} \n\n`;
+    message += `Total Duration: \n ${formatSeconds(totalDuration)} \n\n`;
   }
   ctx.reply(message);
 });
 
+
+function formatSeconds(seconds) {
+    const duration = momentDuration.duration(seconds, 'seconds');
+
+    const hours = duration.hours();
+    const minutes = duration.minutes();
+    const secs = duration.seconds();
+  
+    let formatted = '';
+  
+    if (hours > 0) {
+      formatted += `${hours}h `;
+    }
+  
+    if (minutes > 0) {
+      formatted += `${minutes}m `;
+    }
+  
+    if (secs > 0 || (hours === 0 && minutes === 0)) {
+      formatted += `${secs}s`;
+    }
+  
+    return formatted.trim();
+  }
+
 bot.launch();
-console.log('Bot running');
+console.log('Bot running...');
