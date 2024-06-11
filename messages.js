@@ -1,19 +1,19 @@
 module.exports = {
     status: {
-        running: 'Stopwatch is running\n\n',
-        paused: 'Stopwatch is paused\n\n',
-        notRunning: 'Stopwatch is not running'
+        running: 'Timer is running\n\n',
+        paused: 'Timer is paused\n\n',
+        notRunning: 'Timer is not running'
     },
     start: {
-        running: 'Stopwatch is already running',
-        resume: 'Stopwatch resumed',
-        started: 'Stopwatch started'
+        running: 'Timer is already running',
+        resume: 'Timer resumed with new session',
+        started: 'Timer started with new session'
     },
     stop: {
-        noActive: 'No active stopwatch to stop.',
-        stopped: (time) => `Stopwatch stopped Time: ${formatSeconds(time)}`
+        noActive: 'No active session to stop.',
+        stopped: (time) => `Timer stopped. Elapsed Time: ${formatSeconds(time)}. Current Session Ended`
     },
-    reset: 'Stopwatch and current session reset',
+    reset: 'Timer and current session reset',
     history: {
         header: 'Timer Sessions History:\n\n',
         subHeader: (timerId) => `Timer ${timerId}: \n`,
