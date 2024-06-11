@@ -1,18 +1,14 @@
-
-
 CREATE TABLE `stopwatch_sessions` (
   `session_id` int NOT NULL,
   `timer_id` int DEFAULT NULL,
   `start_time` datetime DEFAULT NULL,
   `stop_time` datetime DEFAULT NULL,
-  `status` enum('running','stopped','reset') NOT NULL
+  `status` enum('running', 'stopped') NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `timers` (
   `timer_id` int NOT NULL,
-  `start_time` datetime DEFAULT NULL,
-  `end_time` datetime DEFAULT NULL,
-  `isPaused` tinyint(1) DEFAULT NULL
+  `active` tinyInt DEFAULT 1,
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 --

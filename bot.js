@@ -3,13 +3,18 @@ const { composer, checkGroupMiddleware } = require('./middleware');
 
 const { telegramBotToken } = require('./config')
 
-const { startStopwatch, stopStopwatch, resetStopwatch, getHistory } = require('./timer');
+const { getStatus, startStopwatch, stopStopwatch, resetStopwatch, getHistory } = require('./timer');
 
 const bot = new Telegraf(telegramBotToken);
 bot.use(composer);
 
 const GROUP_ID = -1002233703209;
 const checkGroup = checkGroupMiddleware(GROUP_ID);
+
+bot.command('status', checkGroup, async (ctx) => {
+  const response = await getStatus();
+  ctx.reply(response.message);
+});
 
 bot.command('start', checkGroup, async (ctx) => {
   const response = await startStopwatch();

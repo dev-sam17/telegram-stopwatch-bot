@@ -1,8 +1,9 @@
 const mysql = require('mysql2/promise');
 const moment = require('moment-timezone');
-const momentDuration = require('moment');
-require('moment-duration-format');
+
 const { dbConfig } = require('./config');
+
+const { status, start, stop, reset, history } = require('./messages');
 
 const pool = mysql.createPool(dbConfig);
 
@@ -12,27 +13,64 @@ async function clearAllData() {
   await Promise.all([p1, p2])
 }
 
+async function getStatus() {
+  const [active] = await pool.query(`SELECT * FROM timers WHERE active = 1`);
+
+  if(active.length > 0) {
+    const timerId = active[0].timer_id;
+
+    const [sessions] = await pool.query(`SELECT * FROM stopwatch_sessions WHERE timer_id = ? ORDER BY session_id DESC`, [timerId]);
+
+    const latestSession = sessions[0];
+
+    let message = latestSession.stop_time !== null ? status.paused : status.running;
+    let totalDuration;
+
+    sessions.forEach((session, index) => {
+      const _index = sessions.length - index - 1
+      const { start_time, stop_time } = session;
+      const startTime = start_time ? moment(start_time).tz('Asia/Kolkata').format('DD/MM hh:mm A') : 'Not Started';
+      const stopTime = stop_time ? moment(stop_time).tz('Asia/Kolkata').format('DD/MM hh:mm A') : 'Not Stopped';
+      const totalTime = stop_time != null ? (stop_time.getTime() - start_time.getTime()) / 1000 : 0;
+      totalDuration += totalTime;
+
+      message += history.session(_index, startTime, stopTime, totalTime);
+    });
+
+    if(latestSession.stop_time !== null) {
+      return { message: message, active: active.length, };
+    }
+
+    return { message: message, active: active.length };
+  }
+
+  return { message: status.notRunning, active: active.length };
+}
+
 async function startStopwatch() {
-  const [active] = await pool.query(`SELECT * FROM timers WHERE end_time IS NULL AND isPaused = 0`);
-  const [paused] = await pool.query(`SELECT * FROM timers WHERE end_time IS NULL AND isPaused = 1`);
+  const [active] = await pool.query(`SELECT * FROM timers WHERE active = 1`);
 
   if (active.length > 0) {
-    return { message: 'A stopwatch is already running.', active: active.length, paused: paused.length };
+    const timerId = active[0].timer_id;
+
+    const [session] = await pool.query(`SELECT * FROM stopwatch_sessions WHERE timer_id = ? ORDER BY session_id DESC`, [timerId]);
+
+    const latestSession = session[0];
+
+    if(latestSession.stop_time !== null) {
+      await pool.query(`INSERT INTO stopwatch_sessions (timer_id, start_time, status) VALUES (?, NOW(), 'running')`, [timerId]);
+      return { message: start.resume, active: active.length };
+    }
+ 
+    return { message: start.running, active: active.length };
   }
 
-  if (paused.length > 0) {
-    const timerId = paused[0].timer_id;
-    await pool.query(`INSERT INTO stopwatch_sessions (timer_id, start_time, status) VALUES (?, NOW(), 'running')`, [timerId]);
-    await pool.query(`UPDATE timers SET isPaused = 0 WHERE timer_id = ?`, [timerId]);
-    return { message: 'Stopwatch resumed.', active: active.length, paused: paused.length };
-  }
+  const [timerResult] = await pool.query(`INSERT INTO timers ()  VALUES ()`, []);
 
-  const [timerResult] = await pool.query(`INSERT INTO timers (start_time, isPaused)  VALUES (NOW(), 0)`, []);
   const timerId = timerResult.insertId;
   await pool.query(`INSERT INTO stopwatch_sessions (timer_id, start_time, status) VALUES (?, NOW(), 'running')`, [timerId]);
 
-  return { message: 'Stopwatch started!', active: active.length, paused: paused.length };
-
+  return { message: start.started, active: active.length };
 }
 
 async function stopStopwatch() {
@@ -41,12 +79,11 @@ async function stopStopwatch() {
   );
 
   if (activeSession.length === 0) {
-    return { message: 'No active stopwatch to stop.', activeSession: activeSession.length };
+    return { message: stop.noActive, activeSession: activeSession.length };
   }
 
-  const { session_id, timer_id, start_time } = activeSession[0];
+  const { session_id, start_time } = activeSession[0];
   await pool.query(`UPDATE stopwatch_sessions SET stop_time = NOW(), status = 'stopped' WHERE session_id = ?`, [session_id]);
-  await pool.query(`UPDATE timers SET isPaused = 1 WHERE timer_id = ?`, [timer_id]);
 
   const [totalResult] = await pool.query(
     `SELECT TIMESTAMPDIFF(SECOND, ?, NOW()) AS duration FROM stopwatch_sessions WHERE session_id = ?`,
@@ -54,23 +91,22 @@ async function stopStopwatch() {
   );
   const total = totalResult[0].duration;
 
-  return { message: `Stopwatch stopped!  Time: ${formatSeconds(total)} seconds`, time: total, activeSession: activeSession.length };
-
+  return { message: stop.stopped(total), time: total, activeSession: activeSession.length };
 }
 
 async function resetStopwatch() {
-  const [data] = await pool.query(`UPDATE timers SET end_time = NOW() WHERE end_time IS NULL`);
+  const [data] = await pool.query(`UPDATE timers SET active = 0`);
 
   await stopStopwatch();
-  return { message: 'Stopwatch and current session reset!', affectedRows: data.affectedRows };
+  return { message: reset, affectedRows: data.affectedRows };
 }
 
 async function getHistory() {
   const [timers] = await pool.query(`SELECT * FROM timers ORDER BY timer_id DESC`);
-  let message = 'Timer Sessions History:\n\n';
+  let message = history.header;
 
   for (let timer of timers) {
-    message += `Timer ${timer.timer_id}:\n`;
+    message += history.subHeader(timer.timer_id);
     let totalDuration = 0;
 
     const [sessions] = await pool.query(`SELECT * FROM stopwatch_sessions WHERE timer_id = ? ORDER BY session_id`, [timer.timer_id]);
@@ -82,40 +118,17 @@ async function getHistory() {
       const totalTime = stop_time != null ? (stop_time.getTime() - start_time.getTime()) / 1000 : 0;
       totalDuration += totalTime;
 
-      message += `Session ${index + 1}: \n ${startTime} - ${stopTime} - ${formatSeconds(totalTime)}\n`;
+      message += history.session(index, startTime, stopTime, totalTime);
     });
 
-    message += `Total Duration: \n ${formatSeconds(totalDuration)} \n\n`;
+    message += history.total(totalDuration);
   }
 
   return message;
 }
 
-function formatSeconds(seconds) {
-  const duration = momentDuration.duration(seconds, 'seconds');
-
-  const hours = duration.hours();
-  const minutes = duration.minutes();
-  const secs = duration.seconds();
-
-  let formatted = '';
-
-  if (hours > 0) {
-    formatted += `${hours}h `;
-  }
-
-  if (minutes > 0) {
-    formatted += `${minutes}m `;
-  }
-
-  if (secs > 0 || (hours === 0 && minutes === 0)) {
-    formatted += `${secs}s`;
-  }
-
-  return formatted.trim();
-}
-
 module.exports = {
+  getStatus,
   startStopwatch,
   stopStopwatch,
   resetStopwatch,
